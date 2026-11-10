@@ -387,7 +387,7 @@ const first = n => (n||'').split(/\s+/)[0] || 'there';
 const DEFAULTS = {
   business:'CleaningPower', phone:'', email:'', solaSite:'', taxRate:6.625, dueDays:7,
   tplReminder:'Hi {first}, this is {business} confirming your {service} on {date} at {time} at {address}. Reply C to confirm or call {phone} to reschedule.',
-  tplInvoice:'Hi {first}, here is your invoice {number} from {business} for {total}. Pay securely here: {link} Thank you!',
+  tplInvoice:'Hi {first}, here is your invoice {number} from {business} for {total}.\nPay securely here:\n{link}\nThank you!',
   tplQuote:'Hi {first}, here is your quote {number} from {business} for {total}: {items}. Reply YES to approve and we will get you on the schedule.',
 };
 const COLS = ['clients','quotes','invoices','jobs'];
@@ -913,10 +913,10 @@ function textSheet(c, msg, onSent){
   openSheet(sheetTop('Text message') + `
     <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><div class="meta">To</div><b>${esc(c?.name||'Client')}</b> <span class="num">${esc(phone||'No phone on file')}</span></div>${phone?`<button class="mini" id="copy-phone">${ic('copy',2.4)}Copy number</button>`:''}</div></div>
     <div class="field"><label for="sms-msg">Message</label><textarea id="sms-msg" style="min-height:140px">${esc(msg)}</textarea></div>
-    <div class="actions"><button class="btn primary" id="copy-msg">${ic('copy')}Copy message</button>
-      ${digits?`<a class="btn" id="open-sms" href="sms:${esc(digits)}?&body=${encodeURIComponent(msg)}">${ic('msg')}Open Messages</a>`:'<span></span>'}
-      <button class="btn good wide" id="mark-sent">${ic('check')}I sent it</button></div>
-    <p class="hint">Copy and paste into your texting app. "Open Messages" works on most phones. Tap "I sent it" so the app tracks it.</p>`, (sh,close) => {
+    <div class="actions">${digits?`<a class="btn primary wide" id="open-sms" href="sms:${esc(digits)}?&body=${encodeURIComponent(msg)}">${ic('msg')}Send in Messages</a>`:''}
+      <button class="btn" id="copy-msg">${ic('copy')}Copy message</button>
+      <button class="btn good" id="mark-sent">${ic('check')}I sent it</button></div>
+    <p class="hint">"Send in Messages" opens your Messages app with the text ready - just tap Send there. Then tap "I sent it" here so the app tracks it.</p>`, (sh,close) => {
     const ta = $('#sms-msg',sh);
     ta.oninput = () => { const a=$('#open-sms',sh); if(a) a.href=`sms:${digits}?&body=${encodeURIComponent(ta.value)}`; };
     $('#copy-msg',sh).onclick = () => copy(ta.value,'Message copied');
