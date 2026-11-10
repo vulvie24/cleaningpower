@@ -166,6 +166,12 @@ button.row:hover{background:var(--surface-2)}
 .create button svg{width:26px;height:26px;color:var(--accent)}
 .create button span{font-weight:500;font-size:12.5px;color:var(--muted)}
 .hint{font-size:12.5px;color:var(--muted);margin:0}
+.import{display:flex;gap:8px;flex-wrap:wrap}
+.sheet{overflow-x:hidden}
+.sheet-inner{min-width:0}
+input[type="date"],input[type="time"]{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;min-height:44px;text-align:left}
+input::-webkit-date-and-time-value{text-align:left}
+.import .btn{flex:1 1 160px;padding:10px 12px;font-size:14px}
 .paybox{display:flex;gap:8px;align-items:center;background:var(--accent-soft);border-radius:12px;padding:10px 12px}
 .paybox code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;color:var(--accent)}
 .toggle{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
@@ -330,9 +336,9 @@ const statusPill = s => {
 };
 function payLink(inv){
   let site = String(S.settings.solaSite||'').trim(); if(!site) return '';
-  const base = /^https?:\/\//.test(site) ? site : 'https://secure.cardknox.com/' + site.replace(/^\/+/,'');
+  const base = (/^https?:\/\//.test(site) ? site : 'https://secure.cardknox.com/' + site.replace(/^\/+/,'')).split('?')[0];
   const c = client(inv.clientId) || {};
-  const p = new URLSearchParams({ xAmount: totals(inv).total.toFixed(2), xInvoice: inv.number||'', xName: c.name||'', xEmail: c.email||'', xPhone: c.phone||'' });
+  const p = new URLSearchParams({ xCommand:'cc:sale', AmountLocked:'1', xAmount: totals(inv).total.toFixed(2), xInvoice: inv.number||'', xName: c.name||'', xBillFirstName: first(c.name), xEmail: c.email||'', xPhone: c.phone||'', xBillPhone: c.phone||'' });
   return base + (base.includes('?')?'&':'?') + p.toString();
 }
 function fill(tpl, vars){ return String(tpl||'').replace(/\{(\w+)\}/g, (m,k) => vars[k] ?? ''); }
@@ -455,7 +461,9 @@ function viewClients(){
   const list = S.clients.filter(c=>!q || [c.name,c.phone,c.email,c.address].join(' ').toLowerCase().includes(q)).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const rows = list.map(c => { const owed = S.invoices.filter(i=>i.clientId===c.id && invStatus(i)!=='paid').reduce((a,i)=>a+totals(i).total,0);
     return `<button class="row" data-client="${c.id}"><div class="avatar">${esc(initials(c.name))}</div><div class="main"><div class="t">${esc(c.name)}</div><div class="s">${esc(c.phone||c.email||c.address||'No contact info')}</div></div>${owed?`<div class="amt">${money(owed)}<span class="pill info">Owes</span></div>`:''}</button>`; });
-  return header('Clients', `${S.clients.length} total`) + `<input class="search" id="c-search" type="search" placeholder="Search name, phone, address" value="${esc(UI.cSearch)}">` +
+  return header('Clients', `${S.clients.length} total`) + `<div class="import">${hasPicker()?`<button class="btn" type="button" id="bulk-pick">${ic('users')}Import from contacts</button>`:''}<label class="btn" for="bulk-vcf">${ic('users')}${hasPicker()?'Import contact file':'Import from contacts'}</label><input id="bulk-vcf" type="file" accept=".vcf,text/vcard,text/x-vcard,text/directory" multiple hidden></div>
+  ${hasPicker()?'':'<p class="hint">iPhone: in Contacts, select one or more people → Share → Save to Files, then tap Import and choose the file.</p>'}
+  <input class="search" id="c-search" type="search" placeholder="Search name, phone, address" value="${esc(UI.cSearch)}">` +
     listOrEmpty(rows,'No clients yet','Tap New → Client, or add one while making a quote.');
 }
 
@@ -486,6 +494,8 @@ function bindCommon(){
   $('#cal-prev') && ($('#cal-prev').onclick=()=>{UI.calMonth=new Date(UI.calMonth.getFullYear(),UI.calMonth.getMonth()-1,1); render();});
   $('#cal-next') && ($('#cal-next').onclick=()=>{UI.calMonth=new Date(UI.calMonth.getFullYear(),UI.calMonth.getMonth()+1,1); render();});
   $('#add-job-day') && ($('#add-job-day').onclick=()=>openJob(null,{date:UI.calSel}));
+  const bp = $('#bulk-pick'); if(bp) bp.onclick = async () => { try { importMany(await pickContacts(true)); } catch(e){ if(e && e.name!=='AbortError') toast('Could not open contacts'); } };
+  const bv = $('#bulk-vcf'); if(bv) bv.onchange = async () => { const list = await readVcfFiles(bv.files); bv.value=''; if(!list.length){ toast('No contacts found in that file'); return; } importMany(list); };
   const cs = $('#c-search'); if(cs) cs.oninput = () => { UI.cSearch = cs.value; render(); };
 }
 $('#fab').onclick = () => openSheet(sheetTop('Create') + `<div class="create">
@@ -496,14 +506,71 @@ $('#fab').onclick = () => openSheet(sheetTop('Create') + `<div class="create">
   $$('[data-new]',sh).forEach(b=>b.onclick=()=>{ close(); setTimeout(()=>({quote:()=>editDoc('quotes'),invoice:()=>editDoc('invoices'),job:()=>openJob(),client:()=>editClient()}[b.dataset.new])(),230); });
 });
 
+/* ---------- contacts import ---------- */
+const hasPicker = () => { try { return 'contacts' in navigator && 'select' in navigator.contacts; } catch(e){ return false; } };
+function parseVCards(text){
+  const lines = String(text).replace(/\r\n/g,'\n').replace(/\n[ \t]/g,'').split('\n');
+  const out = []; let cur = null;
+  const un = v => String(v||'').replace(/\\n/gi,' ').replace(/\\([,;\\])/g,'$1').trim();
+  for(const raw of lines){
+    const i = raw.indexOf(':'); if(i<0) continue;
+    const head = raw.slice(0,i), val = raw.slice(i+1);
+    const key = head.split(';')[0].split('.').pop().toUpperCase(); const params = head.toUpperCase();
+    if(key==='BEGIN' && /VCARD/i.test(val)){ cur = {name:'',phone:'',email:'',address:'',_cell:false}; continue; }
+    if(key==='END' && cur){ if(cur.name||cur.phone||cur.email){ delete cur._cell; out.push(cur); } cur=null; continue; }
+    if(!cur) continue;
+    if(key==='FN' && un(val)) cur.name = un(val);
+    else if(key==='N' && !cur.name){ const p = val.split(';').map(un); cur.name = [p[3],p[1],p[2],p[0],p[4]].filter(Boolean).join(' '); }
+    else if(key==='ORG' && !cur.name) cur.name = un(val.split(';')[0]);
+    else if(key==='TEL'){ const v = un(val).replace(/^tel:/i,''); const cell = /CELL|IPHONE|MOBILE/.test(params); if(v && (!cur.phone || (cell && !cur._cell))){ cur.phone = v; cur._cell = cell; } }
+    else if(key==='EMAIL' && !cur.email) cur.email = un(val);
+    else if(key==='ADR' && !cur.address){ const p = val.split(';').map(un); cur.address = [p[2], p[3], [p[4],p[5]].filter(Boolean).join(' ')].filter(Boolean).join(', '); }
+  }
+  return out;
+}
+async function pickContacts(multiple){
+  let props = ['name','tel','email'];
+  try { const sup = await navigator.contacts.getProperties(); if(sup.includes('address')) props.push('address'); } catch(e){}
+  const res = await navigator.contacts.select(props, {multiple});
+  return (res||[]).map(c => { const a = (c.address||[])[0];
+    return { name:(c.name||[])[0]||'', phone:(c.tel||[])[0]||'', email:(c.email||[])[0]||'',
+      address: a ? [(a.addressLine||[]).join(' '), a.city, [a.region,a.postalCode].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '' }; });
+}
+function readVcfFiles(files){ return Promise.all([...files].map(f=>f.text())).then(ts => ts.flatMap(parseVCards)); }
+function contactImportHTML(p){
+  return `<div class="import">${hasPicker()?`<button class="btn" type="button" id="${p}-pick">${ic('users')}Pick from contacts</button>`:''}
+    <label class="btn" for="${p}-vcf">${ic('users')}${hasPicker()?'Contact card file':'Add from contacts'}</label>
+    <input id="${p}-vcf" type="file" accept=".vcf,text/vcard,text/x-vcard,text/directory" multiple hidden></div>
+    ${hasPicker()?'':`<p class="hint">iPhone: in Contacts, open the person → Share Contact → Save to Files. Then tap "Add from contacts" and choose that file.</p>`}`;
+}
+function bindContactImport(sh, p){
+  const put = ct => { if(!ct){ toast('No contact found in that file'); return; }
+    [['name','name'],['phone','phone'],['email','email'],['addr','address']].forEach(([id,k]) => { const el=$(`#${p}-${id}`,sh); if(el && ct[k]) el.value = ct[k]; });
+    toast('Contact filled in. Check it, then save.'); };
+  const pk = $(`#${p}-pick`,sh); if(pk) pk.onclick = async () => { try { put((await pickContacts(false))[0]); } catch(e){ if(e && e.name!=='AbortError' && e.name!=='InvalidStateError') toast('Could not open contacts'); } };
+  const f = $(`#${p}-vcf`,sh); if(f) f.onchange = async () => { const list = await readVcfFiles(f.files); f.value=''; put(list[0]); };
+}
+async function importMany(list){
+  const norm = v => String(v||'').replace(/\D/g,'').slice(-10);
+  const have = new Set(S.clients.flatMap(c => [norm(c.phone), (c.name||'').toLowerCase()]).filter(Boolean));
+  let added = 0, skipped = 0;
+  for(const ct of list){
+    if(!ct.name){ skipped++; continue; }
+    if((ct.phone && have.has(norm(ct.phone))) || have.has(ct.name.toLowerCase())){ skipped++; continue; }
+    await save('clients', {...ct, notes:'', createdAt:today()}); added++;
+    have.add(norm(ct.phone)); have.add(ct.name.toLowerCase());
+  }
+  toast(`Added ${added} client${added===1?'':'s'}` + (skipped?` · skipped ${skipped} already saved`:''));
+}
+
 /* ---------- client picker ---------- */
 function clientPicker(selected){
   const opts = [...S.clients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)}</option>`).join('');
   return `<div class="field"><label for="f-client">Client</label><select id="f-client"><option value="">Choose a client…</option>${opts}<option value="__new">+ New client</option></select></div>
-  <div class="card" id="new-client" hidden><div class="grid2"><div class="field"><label for="nc-name">Name</label><input id="nc-name" autocomplete="off"></div><div class="field"><label for="nc-phone">Mobile</label><input id="nc-phone" type="tel"></div></div>
+  <div class="card" id="new-client" hidden>${contactImportHTML('nc')}<div class="grid2"><div class="field"><label for="nc-name">Name</label><input id="nc-name" autocomplete="off"></div><div class="field"><label for="nc-phone">Mobile</label><input id="nc-phone" type="tel"></div></div>
   <div class="field"><label for="nc-email">Email</label><input id="nc-email" type="email"></div><div class="field"><label for="nc-addr">Service address</label><input id="nc-addr"></div></div>`;
 }
-function bindPicker(sh, onChange){ const sel=$('#f-client',sh); sel.onchange=()=>{ $('#new-client',sh).hidden = sel.value!=='__new'; onChange && onChange(sel.value); }; }
+function bindPicker(sh, onChange){ bindContactImport(sh,'nc'); const sel=$('#f-client',sh); sel.onchange=()=>{ $('#new-client',sh).hidden = sel.value!=='__new'; onChange && onChange(sel.value); }; }
 async function resolveClient(sh){
   const v = $('#f-client',sh).value;
   if(v!=='__new') return v;
@@ -668,12 +735,13 @@ function openJob(existing, preset){
 /* ---------- clients ---------- */
 function editClient(existing){
   const c = existing ? {...existing} : {name:'',phone:'',email:'',address:'',notes:''};
-  openSheet(sheetTop(existing?'Edit client':'New client') + `
+  openSheet(sheetTop(existing?'Edit client':'New client') + `${existing?'':contactImportHTML('c')}
     <div class="field"><label for="c-name">Name</label><input id="c-name" value="${esc(c.name)}"></div>
     <div class="grid2"><div class="field"><label for="c-phone">Mobile</label><input id="c-phone" type="tel" value="${esc(c.phone)}"></div><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email)}"></div></div>
     <div class="field"><label for="c-addr">Service address</label><input id="c-addr" value="${esc(c.address)}"></div>
     <div class="field"><label for="c-notes">Notes</label><textarea id="c-notes" placeholder="Residential / commercial, access, preferences">${esc(c.notes)}</textarea></div>
     <button class="btn primary" id="save-client">Save client</button>`, (sh,close) => {
+    bindContactImport(sh,'c');
     $('#save-client',sh).onclick = async () => { const name=$('#c-name',sh).value.trim(); if(!name){ toast('Enter a name'); return; }
       const n = await save('clients',{...c, name, phone:$('#c-phone',sh).value.trim(), email:$('#c-email',sh).value.trim(), address:$('#c-addr',sh).value.trim(), notes:$('#c-notes',sh).value, createdAt:c.createdAt||today()});
       close(); toast('Client saved'); if(existing) setTimeout(()=>viewClient(n.id),240); };
@@ -723,6 +791,9 @@ function openSettings(){
       <div class="field"><label for="s-tq">Quote</label><textarea id="s-tq">${esc(s.tplQuote)}</textarea></div>
       <div class="field"><label for="s-ti">Invoice</label><textarea id="s-ti">${esc(s.tplInvoice)}</textarea></div></div>
     <button class="btn primary" id="save-settings">Save settings</button>
+    <div class="card"><h3>Password</h3>
+      <div class="field"><label for="s-newpass">New password</label><input id="s-newpass" type="password" autocomplete="new-password" minlength="8"></div>
+      <button class="btn" id="change-pass">Change password</button></div>
     <button class="btn" id="sign-out">Sign out</button>`, (sh,close) => {
     $('#save-settings',sh).onclick = async () => {
       await saveSettings({ business:$('#s-biz',sh).value.trim()||'My business', phone:$('#s-phone',sh).value.trim(), email:$('#s-email',sh).value.trim(),
@@ -730,6 +801,8 @@ function openSettings(){
         tplReminder:$('#s-tr',sh).value, tplQuote:$('#s-tq',sh).value, tplInvoice:$('#s-ti',sh).value });
       close(); toast('Settings saved'); };
     $('#sign-out',sh).onclick = async () => { close(); await sb.auth.signOut(); };
+    $('#change-pass',sh).onclick = async () => { const p=$('#s-newpass',sh).value; if(p.length<8){ toast('Use at least 8 characters'); return; }
+      const { error } = await sb.auth.updateUser({ password:p }); if(error){ toast(error.message); return; } $('#s-newpass',sh).value=''; toast('Password changed'); };
   });
 }
 
