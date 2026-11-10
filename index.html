@@ -168,6 +168,8 @@ button.row:hover{background:var(--surface-2)}
 .create button span{font-weight:500;font-size:12.5px;color:var(--muted)}
 .hint{font-size:12.5px;color:var(--muted);margin:0}
 .import{display:flex;gap:8px;flex-wrap:wrap}
+.cform{display:flex;flex-direction:column;gap:16px;margin:0}
+form.card{margin:0}
 .sheet{overflow-x:hidden}
 .sheet-inner{min-width:0}
 input[type="date"],input[type="time"]{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;min-height:44px;text-align:left}
@@ -540,15 +542,19 @@ async function pickContacts(multiple){
 }
 function readVcfFiles(files){ return Promise.all([...files].map(f=>f.text())).then(ts => ts.flatMap(parseVCards)); }
 function contactImportHTML(p){
-  return `<div class="import">${hasPicker()?`<button class="btn" type="button" id="${p}-pick">${ic('users')}Pick from contacts</button>`:''}
-    <label class="btn" for="${p}-vcf">${ic('users')}${hasPicker()?'Contact card file':'Add from contacts'}</label>
-    <input id="${p}-vcf" type="file" accept=".vcf,text/vcard,text/x-vcard,text/directory" multiple hidden></div>
-    ${hasPicker()?'':`<p class="hint">iPhone: in Contacts, open the person → Share Contact → Save to Files. Then tap "Add from contacts" and choose that file.</p>`}`;
+  if(hasPicker()) return `<div class="import"><button class="btn" type="button" id="${p}-pick">${ic('users')}Pick from contacts</button>
+    <label class="btn" for="${p}-vcf">${ic('users')}Contact card file</label>
+    <input id="${p}-vcf" type="file" accept=".vcf,text/vcard,text/x-vcard,text/directory" multiple hidden></div>`;
+  return `<div class="import"><button class="btn" type="button" id="${p}-af">${ic('users')}Add from contacts</button></div>
+    <p class="hint">Tap <b>Name</b>, then tap <b>AutoFill Contact</b> just above the keyboard and pick the person. If you don't see it, turn on Settings → Apps → Safari → AutoFill → Use Contact Info.
+    <label for="${p}-vcf" style="color:var(--accent);font-weight:600;cursor:pointer">Or import a contact card file.</label></p>
+    <input id="${p}-vcf" type="file" accept=".vcf,text/vcard,text/x-vcard,text/directory" multiple hidden>`;
 }
 function bindContactImport(sh, p){
   const put = ct => { if(!ct){ toast('No contact found in that file'); return; }
     [['name','name'],['phone','phone'],['email','email'],['addr','address']].forEach(([id,k]) => { const el=$(`#${p}-${id}`,sh); if(el && ct[k]) el.value = ct[k]; });
     toast('Contact filled in. Check it, then save.'); };
+  const af = $(`#${p}-af`,sh); if(af) af.onclick = () => { const n=$(`#${p}-name`,sh); n.focus(); n.scrollIntoView({block:'center'}); };
   const pk = $(`#${p}-pick`,sh); if(pk) pk.onclick = async () => { try { put((await pickContacts(false))[0]); } catch(e){ if(e && e.name!=='AbortError' && e.name!=='InvalidStateError') toast('Could not open contacts'); } };
   const f = $(`#${p}-vcf`,sh); if(f) f.onchange = async () => { const list = await readVcfFiles(f.files); f.value=''; put(list[0]); };
 }
@@ -569,8 +575,8 @@ async function importMany(list){
 function clientPicker(selected){
   const opts = [...S.clients].sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)}</option>`).join('');
   return `<div class="field"><label for="f-client">Client</label><select id="f-client"><option value="">Choose a client…</option>${opts}<option value="__new">+ New client</option></select></div>
-  <div class="card" id="new-client" hidden>${contactImportHTML('nc')}<div class="grid2"><div class="field"><label for="nc-name">Name</label><input id="nc-name" autocomplete="off"></div><div class="field"><label for="nc-phone">Mobile</label><input id="nc-phone" type="tel"></div></div>
-  <div class="field"><label for="nc-email">Email</label><input id="nc-email" type="email"></div><div class="field"><label for="nc-addr">Service address</label><input id="nc-addr"></div></div>`;
+  <form class="card" id="new-client" hidden autocomplete="on" onsubmit="return false">${contactImportHTML('nc')}<div class="grid2"><div class="field"><label for="nc-name">Name</label><input id="nc-name" name="name" autocomplete="name"></div><div class="field"><label for="nc-phone">Mobile</label><input id="nc-phone" type="tel" name="tel" autocomplete="tel"></div></div>
+  <div class="field"><label for="nc-email">Email</label><input id="nc-email" type="email" name="email" autocomplete="email"></div><div class="field"><label for="nc-addr">Service address</label><input id="nc-addr" name="street-address" autocomplete="street-address"></div></form>`;
 }
 function bindPicker(sh, onChange){ bindContactImport(sh,'nc'); const sel=$('#f-client',sh); sel.onchange=()=>{ $('#new-client',sh).hidden = sel.value!=='__new'; onChange && onChange(sel.value); }; }
 async function resolveClient(sh){
@@ -791,9 +797,11 @@ function openJob(existing, preset){
 function editClient(existing){
   const c = existing ? {...existing} : {name:'',phone:'',email:'',address:'',notes:''};
   openSheet(sheetTop(existing?'Edit client':'New client') + `${existing?'':contactImportHTML('c')}
-    <div class="field"><label for="c-name">Name</label><input id="c-name" value="${esc(c.name)}"></div>
-    <div class="grid2"><div class="field"><label for="c-phone">Mobile</label><input id="c-phone" type="tel" value="${esc(c.phone)}"></div><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email)}"></div></div>
-    <div class="field"><label for="c-addr">Service address</label><input id="c-addr" value="${esc(c.address)}"></div>
+    <form class="cform" autocomplete="on" onsubmit="return false">
+    <div class="field"><label for="c-name">Name</label><input id="c-name" name="name" autocomplete="name" value="${esc(c.name)}"></div>
+    <div class="grid2"><div class="field"><label for="c-phone">Mobile</label><input id="c-phone" type="tel" name="tel" autocomplete="tel" value="${esc(c.phone)}"></div><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" name="email" autocomplete="email" value="${esc(c.email)}"></div></div>
+    <div class="field"><label for="c-addr">Service address</label><input id="c-addr" name="street-address" autocomplete="street-address" value="${esc(c.address)}"></div>
+    </form>
     <div class="field"><label for="c-notes">Notes</label><textarea id="c-notes" placeholder="Residential / commercial, access, preferences">${esc(c.notes)}</textarea></div>
     <button class="btn primary" id="save-client">Save client</button>`, (sh,close) => {
     bindContactImport(sh,'c');
