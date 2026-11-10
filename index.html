@@ -286,6 +286,8 @@ async function loadAll(){
 }
 async function boot(){
   render();
+  let recovering = false;
+  sb.auth.onAuthStateChange(e => { if(e==='PASSWORD_RECOVERY' && !recovering){ recovering = true; setTimeout(()=>newPasswordSheet(),400); } });
   const { data } = await sb.auth.getSession();
   session = data.session;
   sb.auth.onAuthStateChange((_e, s) => { const was = !!session; session = s; if(!!s !== was){ s ? (S.mode='cloud', loadAll()) : (S.mode='signedout', COLS.forEach(c=>S[c]=[]), render()); } });
@@ -321,6 +323,7 @@ function viewSignIn(){
       <div class="field"><label for="a-pass">Password</label><input id="a-pass" type="password" autocomplete="current-password" minlength="8"></div>
       <button class="btn primary" id="a-in">Sign in</button>
       <button class="btn" id="a-up">Create account</button>
+      <button class="link" type="button" id="a-forgot" style="align-self:center">Forgot password?</button>
       <p class="hint" id="a-msg"></p></div></div>`;
 }
 function bindSignIn(){
@@ -332,6 +335,18 @@ function bindSignIn(){
     msg('Creating account…'); const { data, error } = await sb.auth.signUp({ ...c, options:{ emailRedirectTo: location.origin + location.pathname } });
     if(error) return msg(error.message); if(!data.session) msg('Check your email and tap the confirmation link, then sign in here.'); };
   $('#a-pass').onkeydown = e => { if(e.key==='Enter') $('#a-in').click(); };
+  $('#a-forgot').onclick = async () => { const email=$('#a-email').value.trim(); if(!email) return msg('Enter your email first, then tap Forgot password.');
+    msg('Sending reset email…'); const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    msg(error ? error.message : 'Check your email and tap the reset link. It opens this app so you can set a new password.'); };
+}
+function newPasswordSheet(){
+  openSheet(sheetTop('Set a new password') + `
+    <div class="field"><label for="np-pass">New password</label><input id="np-pass" type="password" autocomplete="new-password" minlength="8"></div>
+    <button class="btn primary" id="np-save">Save new password</button><p class="hint" id="np-msg">At least 8 characters. Save it in your password manager.</p>`, (sh,close) => {
+    $('#np-save',sh).onclick = async () => { const p=$('#np-pass',sh).value; if(p.length<8){ $('#np-msg',sh).textContent='Use at least 8 characters.'; return; }
+      const { error } = await sb.auth.updateUser({ password:p }); if(error){ $('#np-msg',sh).textContent=error.message; return; }
+      close(); toast('Password saved. You are signed in.'); history.replaceState(null,'',location.pathname); };
+  });
 }
 
 /* ---------- domain ---------- */
