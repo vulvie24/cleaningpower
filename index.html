@@ -356,6 +356,7 @@ const I = {
   inv:'<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
   users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
   gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  repeat:'<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
   msg:'<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
   close:'<path d="M6 6l12 12M18 6L6 18"/>',
@@ -377,6 +378,7 @@ const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-$
 const pISO = s => { const [y,m,d] = String(s).split('-').map(Number); return new Date(y, (m||1)-1, d||1); };
 const today = () => iso(new Date());
 const addDays = (s, n) => { const d = pISO(s); d.setDate(d.getDate()+n); return iso(d); };
+const addMonths = (s, n) => { const d = pISO(s); const day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth()+n); d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())); return iso(d); };
 const fDate = s => s ? pISO(s).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : '';
 const fDateLong = s => s ? pISO(s).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}) : '';
 const fTime = t => { if(!t) return ''; let [h,m] = t.split(':').map(Number); const ap = h>=12?'PM':'AM'; h = h%12||12; return `${h}:${String(m).padStart(2,'0')} ${ap}`; };
@@ -389,6 +391,8 @@ const DEFAULTS = {
   tplReminder:'Hi {first}, this is {business} confirming your {service} on {date} at {time} at {address}. Reply C to confirm or call {phone} to reschedule.',
   tplInvoice:'Hi {first}, here is your invoice {number} from {business} for {total}.\nPay securely here:\n{link}\nThank you!',
   tplQuote:'Hi {first}, here is your quote {number} from {business} for {total}: {items}. Reply YES to approve and we will get you on the schedule.',
+  followUpMonths:6, reviewLink:'',
+  tplFollowUp:"Hi {first}, it's {business}. It's been about {months} months since your last {service}. Want us to get you back on the schedule? Reply here or call {phone}.",
 };
 const COLS = ['clients','quotes','invoices','jobs'];
 const S = { clients:[], quotes:[], invoices:[], jobs:[], settings:{...DEFAULTS}, mode:'loading', ready:false, stale:false };
@@ -398,13 +402,13 @@ const SB_URL = 'https://mcgkrsohhsirfxbbmuil.supabase.co';
 const SB_KEY = 'sb_publishable_92-tLwVh2IiiFEj348C72Q_JW_BnsET';
 const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 let session = null;
-const NULLABLE = new Set(['date','due','sent_at','paid_on','created_at','reminder_sent_at','client_id','quote_id','invoice_id','job_id']);
+const NULLABLE = new Set(['date','due','sent_at','paid_on','created_at','reminder_sent_at','client_id','quote_id','invoice_id','job_id','follow_up_done_at','follow_up_snooze','completed_at']);
 const ALLOWED = {
-  clients:['id','name','phone','email','address','notes','created_at','updated_at'],
+  clients:['id','name','phone','email','address','notes','created_at','follow_up_done_at','follow_up_snooze','updated_at'],
   quotes:['id','number','date','client_id','tax_rate','status','items','notes','invoice_id','sent_at','updated_at'],
   invoices:['id','number','date','due','client_id','tax_rate','status','items','notes','quote_id','job_id','sent_at','paid_on','sola_ref','updated_at'],
-  jobs:['id','client_id','title','date','time','duration','price','address','notes','quote_id','reminder_sent_at','updated_at'],
-  settings:['business','phone','email','sola_site','tax_rate','due_days','tpl_reminder','tpl_quote','tpl_invoice','updated_at'],
+  jobs:['id','client_id','title','date','time','duration','price','address','notes','quote_id','reminder_sent_at','completed_at','updated_at'],
+  settings:['business','phone','email','sola_site','tax_rate','due_days','tpl_reminder','tpl_quote','tpl_invoice','follow_up_months','tpl_follow_up','review_link','updated_at'],
 };
 const toSnake = k => k.replace(/[A-Z]/g, m => '_' + m.toLowerCase());
 const toCamel = k => k.replace(/_([a-z])/g, (m,c) => c.toUpperCase());
@@ -505,6 +509,8 @@ function payLink(inv){
 }
 function fill(tpl, vars){ return String(tpl||'').replace(/\{(\w+)\}/g, (m,k) => vars[k] ?? ''); }
 function baseVars(clientId){ const c = client(clientId)||{}; return { first:first(c.name), name:c.name||'', business:S.settings.business||'', phone:S.settings.phone||'' }; }
+const reviewLine = () => { const r = String(S.settings.reviewLink||'').trim(); return /^https?:\/\//i.test(r) ? r : ''; };
+const withReview = (text, tpl) => { const r = reviewLine(); if(!r || String(tpl||'').includes('{review}')) return text; return text + `\n\nHappy with our work? A quick Google review helps us a lot:\n${r}`; };
 const itemsText = d => (d.items||[]).map(i=>i.desc).filter(Boolean).join(', ');
 
 /* ---------- ui primitives ---------- */
@@ -548,7 +554,7 @@ function jobRow(j){
   return `<div class="row">
     <button class="when" data-job="${j.id}" style="border:0">${esc((fTime(j.time)||'Any').replace(/ (AM|PM)$/,''))}${j.time?`<small>${fTime(j.time).slice(-2)}</small>`:''}<small>${esc(pISO(j.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}))}</small></button>
     <button class="main" data-job="${j.id}" style="border:0;background:none;text-align:left;padding:0;min-width:0"><div class="t">${esc(cname(j.clientId))}</div><div class="s">${esc(j.title||'Job')}${j.address?' · '+esc(j.address):''}</div></button>
-    <button class="mini ${sent?'done':''}" data-remind="${j.id}">${ic(sent?'check':'msg',2.4)}${sent?'Sent':'Remind'}</button>
+    ${jobDone(j) ? `<span class="mini done">${ic('check',2.4)}Done</span>` : `<button class="mini ${sent?'done':''}" data-remind="${j.id}">${ic(sent?'check':'msg',2.4)}${sent?'Sent':'Remind'}</button>`}
   </div>`;
 }
 function docRow(d, kind){
@@ -557,6 +563,46 @@ function docRow(d, kind){
   return `<button class="row" data-${kind}="${d.id}">${avatar(cname(d.clientId))}
     <div class="main"><div class="t">${esc(cname(d.clientId))}</div><div class="s">${esc(d.number)} · ${esc(sub)}</div></div>
     <div class="amt">${money(totals(d).total)}${statusPill(st)}</div></button>`;
+}
+/* ---------- follow-ups ---------- */
+const jobDone = j => !!j.completedAt || (j.date && j.date < today());
+const doneDate = j => j.completedAt ? iso(new Date(j.completedAt)) : j.date;
+function followUpFor(c){
+  const t = today(); const js = S.jobs.filter(j => j.clientId===c.id);
+  if(js.some(j => !jobDone(j) && j.date >= t)) return null;            // already booked
+  const done = js.filter(jobDone).sort((a,b) => doneDate(b).localeCompare(doneDate(a)));
+  if(!done.length) return null;
+  const last = done[0], L = doneDate(last);
+  if(c.followUpDoneAt && c.followUpDoneAt >= L) return null;            // already followed up since
+  const months = Number(S.settings.followUpMonths)||6;
+  const due = addMonths(L, months);
+  const snoozed = c.followUpSnooze && c.followUpSnooze > t;
+  return { client:c, last, lastDate:L, due, months, snoozed, isDue: due <= t && !snoozed };
+}
+const followUps = () => S.clients.map(followUpFor).filter(Boolean);
+function followUpRow(f){
+  return `<button class="row" data-fu="${f.client.id}">${avatar(f.client.name)}
+    <div class="main"><div class="t">${esc(f.client.name)}</div><div class="s">Last job ${esc(fDate(f.lastDate))}${f.last.title?' · '+esc(f.last.title):''}</div></div>
+    <span class="mini">${ic('repeat',2.4)}Follow up</span></button>`;
+}
+function followUpSheet(cid){
+  const c = client(cid); if(!c) return; const f = followUpFor(c); if(!f) return;
+  const msg = fill(S.settings.tplFollowUp, {...baseVars(cid), months:String(f.months), service:(f.last.title||'cleaning').toLowerCase(), date:fDate(f.lastDate)});
+  openSheet(sheetTop('Follow up') + `
+    <div class="card"><div style="display:flex;gap:12px;align-items:center">${avatar(c.name)}<div style="min-width:0"><b>${esc(c.name)}</b><div class="meta">${esc(c.phone||c.email||'No contact info')}</div></div></div>
+      <div class="kv" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div><span>Last job</span><b>${esc(fDate(f.lastDate))}</b></div><div><span>Follow-up due</span><b>${esc(fDate(f.due))}</b></div></div>
+      ${f.last.title?`<div class="meta">${esc(f.last.title)}${f.last.price?' · '+money(f.last.price):''}</div>`:''}</div>
+    <div class="actions"><button class="btn primary wide" id="fu-text" ${c.phone?'':'disabled'}>${ic('msg')}Text ${esc(first(c.name))}</button>
+      <button class="btn" id="fu-book">${ic('cal')}Book a job</button>
+      <button class="btn good" id="fu-done">${ic('check')}Done</button>
+      <button class="btn wide" id="fu-snooze">Remind me in 1 month</button></div>
+    <p class="hint">"Done" clears this until their next job. Booking a job clears it automatically.</p>`, (sh,close) => {
+    const markDone = () => save('clients', {...c, followUpDoneAt: today(), followUpSnooze: ''});
+    $('#fu-text',sh).onclick = () => { close(); setTimeout(()=>textSheet(c, msg, markDone),230); };
+    $('#fu-book',sh).onclick = () => { close(); setTimeout(()=>openJob(null,{clientId:cid, title:f.last.title||'', address:f.last.address||c.address||'', price:f.last.price||''}),230); };
+    $('#fu-done',sh).onclick = async () => { await markDone(); close(); toast('Follow-up done'); };
+    $('#fu-snooze',sh).onclick = async () => { await save('clients', {...c, followUpSnooze: addMonths(today(),1)}); close(); toast('We will remind you in a month'); };
+  });
 }
 const avatar = name => { const n = [...String(name||'?')].reduce((a,c)=>a+c.charCodeAt(0),0)%6+1; return `<div class="avatar" style="background:var(--av${n}b);color:var(--av${n}f)">${esc(initials(name))}</div>`; };
 const listOrEmpty = (rows, title, body) => rows.length ? `<div class="list">${rows.join('')}</div>` : `<div class="empty"><b>${title}</b>${body}</div>`;
@@ -574,6 +620,7 @@ function viewHome(){
   const hr = new Date().getHours(); const hi = hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
   const attention = [...overdue.map(i=>docRow(i,'inv')), ...awaiting.slice(0,5).map(q=>docRow(q,'quote'))];
   const unpaidOpen = unpaid.length - overdue.length;
+  const fu = followUps().filter(f=>f.isDue).sort((a,b)=>a.due.localeCompare(b.due));
   return `<section class="hero">
     <div class="hero-top"><div><p class="eyebrow">${hi}</p><h1>${esc(pISO(t).toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'}))}</h1></div>
       <button class="iconbtn" id="open-settings" aria-label="Settings">${ic('gear')}</button></div>
@@ -589,6 +636,8 @@ function viewHome(){
     ${listOrEmpty(remind.map(jobRow),'All caught up','Every job tomorrow has its reminder sent.')}</div>
   <div class="section"><div class="section-head"><h3>Today's schedule</h3><button class="link" data-go="calendar">Calendar</button></div>
     ${listOrEmpty(todayJobs.map(jobRow),'Nothing scheduled today','Tap New → Job to book one.')}</div>
+  <div class="section"><div class="section-head"><h3>Follow-ups due</h3>${fu.length>1?`<span class="meta">${fu.length} clients</span>`:''}</div>
+    ${listOrEmpty(fu.map(followUpRow),'No follow-ups due',`Clients show up here ${Number(S.settings.followUpMonths)||6} months after their last completed job.`)}</div>
   <div class="section"><div class="section-head"><h3>Needs attention</h3></div>
     ${listOrEmpty(attention,'Nothing waiting','Overdue invoices and unanswered quotes show up here.')}</div>`;
 }
@@ -653,6 +702,7 @@ function bindCommon(){
   $$('[data-go]',v).forEach(b=>b.onclick=()=>location.hash=b.dataset.go);
   $$('[data-job]',v).forEach(b=>b.onclick=()=>openJob(S.jobs.find(j=>j.id===b.dataset.job)));
   $$('[data-remind]',v).forEach(b=>b.onclick=()=>sendReminder(S.jobs.find(j=>j.id===b.dataset.remind)));
+  $$('[data-fu]',v).forEach(b=>b.onclick=()=>followUpSheet(b.dataset.fu));
   $$('[data-inv]',v).forEach(b=>b.onclick=()=>viewDoc('invoices', b.dataset.inv));
   $$('[data-quote]',v).forEach(b=>b.onclick=()=>viewDoc('quotes', b.dataset.quote));
   $$('[data-client]',v).forEach(b=>b.onclick=()=>viewClient(b.dataset.client));
@@ -818,7 +868,7 @@ function viewDoc(col, id){
   const isInv = col==='invoices'; const c = client(d.clientId)||{};
   const st = isInv ? invStatus(d) : d.status; const t = totals(d);
   const link = isInv ? payLink(d) : '';
-  const vars = {...baseVars(d.clientId), number:d.number, total:money(t.total), items:itemsText(d), link: link || '[add your Sola PaymentSITE in Settings]'};
+  const vars = {...baseVars(d.clientId), number:d.number, total:money(t.total), items:itemsText(d), link: link || '[add your Sola PaymentSITE in Settings]', review: reviewLine()};
   let actions = '';
   if(isInv){
     actions = `${link?`<div class="paybox">${ic('card')}<code>${esc(link)}</code><button class="mini" id="copy-link">Copy</button></div>`
@@ -838,7 +888,7 @@ function viewDoc(col, id){
   openSheet(`<div class="sheet-top"><div><h2>${esc(d.number)}</h2><div style="margin-top:4px">${statusPill(st)}${isInv&&d.paidOn?` <span class="meta">on ${fDate(d.paidOn)}</span>`:''}</div></div><button class="iconbtn" data-close aria-label="Close">${ic('close')}</button></div>` + paperHTML(d,isInv) + actions, (sh,close) => {
     const on = (id,fn)=>{ const b=$('#'+id,sh); if(b) b.onclick=fn; };
     on('copy-link', ()=>copy(link,'Pay link copied'));
-    on('text-doc', ()=>{ close(); setTimeout(()=>textSheet(c, fill(isInv?S.settings.tplInvoice:S.settings.tplQuote, vars), async()=>{
+    on('text-doc', ()=>{ close(); setTimeout(()=>textSheet(c, (isInv ? withReview(fill(S.settings.tplInvoice, vars), S.settings.tplInvoice) : fill(S.settings.tplQuote, vars)), async()=>{
       if(!isInv && d.status==='draft') await save('quotes',{...d,status:'sent',sentAt:today()});
       if(isInv) await save('invoices',{...d,sentAt:today()});
     }),230); });
@@ -872,6 +922,7 @@ function emailBody(d, isInv, link){
     ...(isInv && link ? ['Pay securely online:', link, ''] : []),
     ...(!isInv ? ['Reply to this email to approve, and we will get you on the schedule.', ''] : []),
     ...(d.notes ? [d.notes, ''] : []),
+    ...(isInv && reviewLine() ? ['Happy with our work? A quick Google review helps us a lot:', reviewLine(), ''] : []),
     'Thank you,', s.business, ...[s.phone, s.email].filter(Boolean)
   ].join('\n');
 }
@@ -942,6 +993,9 @@ function openJob(existing, preset){
       <div class="field"><label for="j-price">Price</label><input id="j-price" type="number" step="0.01" inputmode="decimal" value="${esc(j.price)}"></div></div>
     <div class="field"><label for="j-addr">Address</label><input id="j-addr" value="${esc(j.address)}"></div>
     <div class="field"><label for="j-notes">Crew notes</label><textarea id="j-notes" placeholder="Gate code, parking, pets">${esc(j.notes)}</textarea></div>
+    ${existing ? (j.completedAt ? `<div class="paybox" style="background:var(--good-soft)"><span style="color:var(--good);font-weight:700;flex:1">${ic('check',2.4).replace('<svg','<svg style="width:16px;height:16px;vertical-align:-3px"')} Completed ${esc(fDate(doneDate(j)))}</span><button class="mini" id="job-undo" type="button">Undo</button></div>`
+      : jobDone(j) ? `<p class="hint">Counted as completed because the date has passed. Delete the job if it didn't happen.</p>`
+      : `<button class="btn good" id="job-complete" type="button">${ic('check')}Mark complete</button>`) : ''}
     ${existing&&j.reminderSentAt?`<p class="hint">Reminder sent ${new Date(j.reminderSentAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</p>`:''}
     <div class="actions"><button class="btn primary ${existing?'':'wide'}" id="save-job">Save job</button>
       ${existing?`<button class="btn" id="job-remind">${ic('msg')}Text reminder</button><button class="btn" id="job-inv">${ic('inv')}Invoice this job</button><button class="btn ghost-bad" id="del-job">Delete</button>`:''}</div>`, (sh,close) => {
@@ -951,6 +1005,8 @@ function openJob(existing, preset){
     $('#save-job',sh).onclick = async () => { const n = await collect(); if(!n) return;
       if(existing && (n.date!==existing.date || n.time!==existing.time)) delete n.reminderSentAt;
       await save('jobs', n); UI.calSel=n.date; UI.calMonth=null; close(); toast('Job saved'); };
+    const jc=$('#job-complete',sh); if(jc) jc.onclick=async()=>{ await save('jobs',{...j, completedAt:new Date().toISOString()}); close(); toast(`Job complete. Follow-up set for ${fDate(addMonths(today(), Number(S.settings.followUpMonths)||6))}`); };
+    const ju=$('#job-undo',sh); if(ju) ju.onclick=async()=>{ await save('jobs',{...j, completedAt:''}); close(); toast('Marked not complete'); };
     const rb=$('#job-remind',sh); if(rb) rb.onclick=()=>{ close(); setTimeout(()=>sendReminder(S.jobs.find(x=>x.id===j.id)||j),230); };
     const ib=$('#job-inv',sh); if(ib) ib.onclick=()=>{ const q = j.quoteId && S.quotes.find(x=>x.id===j.quoteId);
       close(); setTimeout(()=>editDoc('invoices',null,{clientId:j.clientId, jobId:j.id, items: q ? q.items : [{desc:j.title||'Service', qty:1, price:j.price||''}], taxRate: q ? q.taxRate : S.settings.taxRate}),230); };
@@ -984,7 +1040,8 @@ function viewClient(id){
     <div class="card">${c.phone?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="num">${esc(c.phone)}</span><button class="mini" data-cp="${esc(c.phone)}">${ic('copy',2.4)}Copy</button></div>`:''}
       ${c.email?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0"><span style="overflow:hidden;text-overflow:ellipsis">${esc(c.email)}</span><button class="mini" data-cp="${esc(c.email)}">${ic('copy',2.4)}Copy</button></div>`:''}
       ${c.address?`<div>${esc(c.address)}</div>`:''}${c.notes?`<div class="meta" style="white-space:pre-wrap">${esc(c.notes)}</div>`:''}
-      ${!c.phone&&!c.email&&!c.address?'<div class="meta">No contact details yet.</div>':''}</div>
+      ${!c.phone&&!c.email&&!c.address?'<div class="meta">No contact details yet.</div>':''}
+      ${(()=>{ const f=followUpFor(c); return f ? `<button class="paybox" data-fu="${c.id}" style="border:0;text-align:left;cursor:pointer">${ic('repeat',2.2).replace('<svg','<svg style="width:18px;height:18px;flex:none;color:var(--accent)"')}<span style="flex:1;font-weight:600;color:var(--accent)">${f.isDue?'Follow-up due now':f.snoozed?'Follow-up snoozed until '+esc(fDate(c.followUpSnooze)):'Follow-up on '+esc(fDate(f.due))}</span></button>` : ''; })()}</div>
     <div class="actions"><button class="btn primary" data-n="quote">${ic('quote')}New quote</button><button class="btn" data-n="job">${ic('cal')}Book job</button>
       <button class="btn" data-n="invoice">${ic('inv')}New invoice</button><button class="btn" data-n="edit">Edit</button></div>
     ${is.length?`<div class="section"><h3>Invoices</h3><div class="list">${is.join('')}</div></div>`:''}
@@ -993,6 +1050,7 @@ function viewClient(id){
     <button class="btn ghost-bad" id="del-client">Delete</button>`, (sh,close) => {
     $$('[data-cp]',sh).forEach(b=>b.onclick=()=>copy(b.dataset.cp));
     const go = fn => { close(); setTimeout(fn,230); };
+    $$('[data-fu]',sh).forEach(b=>b.onclick=()=>go(()=>followUpSheet(b.dataset.fu)));
     $$('[data-n]',sh).forEach(b=>b.onclick=()=>go({quote:()=>editDoc('quotes',null,{clientId:id}),invoice:()=>editDoc('invoices',null,{clientId:id}),job:()=>openJob(null,{clientId:id,address:c.address||''}),edit:()=>editClient(c)}[b.dataset.n]));
     $$('[data-inv]',sh).forEach(b=>b.onclick=()=>go(()=>viewDoc('invoices',b.dataset.inv)));
     $$('[data-quote]',sh).forEach(b=>b.onclick=()=>go(()=>viewDoc('quotes',b.dataset.quote)));
@@ -1013,11 +1071,18 @@ function openSettings(){
     <div class="card"><h3>Sola payments</h3>
       <div class="field"><label for="s-sola">PaymentSITE name or full link</label><input id="s-sola" placeholder="cleaningpower  or  https://secure.cardknox.com/cleaningpower" value="${esc(s.solaSite)}"></div>
       <p class="hint">Find it in your Sola merchant portal under PaymentSITE. Each invoice link fills in the amount, invoice #, name, email and phone. Make sure those fields are turned on for your PaymentSITE, or Sola ignores them.</p></div>
+    <div class="card"><h3>Google reviews</h3>
+      <div class="field"><label for="s-review">Google review link</label><input id="s-review" type="url" inputmode="url" placeholder="https://g.page/r/…/review" value="${esc(s.reviewLink)}"></div>
+      <p class="hint">Every invoice text and email ends with this link. To get it: open your Google Business Profile (search "CleaningPower" on Google while signed in) → <b>Ask for reviews</b> → copy the link.</p></div>
     <div class="card"><h3>Text templates</h3>
       <p class="hint">Fill-ins: {first} {name} {business} {phone} · reminders: {service} {date} {time} {address} · quotes and invoices: {number} {total} {items} {link}</p>
       <div class="field"><label for="s-tr">Appointment reminder</label><textarea id="s-tr">${esc(s.tplReminder)}</textarea></div>
       <div class="field"><label for="s-tq">Quote</label><textarea id="s-tq">${esc(s.tplQuote)}</textarea></div>
       <div class="field"><label for="s-ti">Invoice</label><textarea id="s-ti">${esc(s.tplInvoice)}</textarea></div></div>
+    <div class="card"><h3>Follow-ups</h3>
+      <div class="field"><label for="s-fum">Remind me to follow up after (months)</label><input id="s-fum" type="number" min="1" max="36" inputmode="numeric" value="${esc(s.followUpMonths)}"></div>
+      <div class="field"><label for="s-tfu">Follow-up text</label><textarea id="s-tfu">${esc(s.tplFollowUp)}</textarea></div>
+      <p class="hint">Fill-ins: {first} {business} {phone} {months} {service} {date}</p></div>
     <button class="btn primary" id="save-settings">Save settings</button>
     <div class="card"><h3>Password</h3>
       <div class="field"><label for="s-newpass">New password</label><input id="s-newpass" type="password" autocomplete="new-password" minlength="8"></div>
@@ -1026,7 +1091,8 @@ function openSettings(){
     $('#save-settings',sh).onclick = async () => {
       await saveSettings({ business:$('#s-biz',sh).value.trim()||'My business', phone:$('#s-phone',sh).value.trim(), email:$('#s-email',sh).value.trim(),
         taxRate:Number($('#s-tax',sh).value)||0, dueDays:Number($('#s-due',sh).value)||0, solaSite:$('#s-sola',sh).value.trim(),
-        tplReminder:$('#s-tr',sh).value, tplQuote:$('#s-tq',sh).value, tplInvoice:$('#s-ti',sh).value });
+        tplReminder:$('#s-tr',sh).value, tplQuote:$('#s-tq',sh).value, tplInvoice:$('#s-ti',sh).value,
+        followUpMonths:Math.min(36,Math.max(1,parseInt($('#s-fum',sh).value,10)||6)), tplFollowUp:$('#s-tfu',sh).value, reviewLink:$('#s-review',sh).value.trim() });
       close(); toast('Settings saved'); };
     $('#sign-out',sh).onclick = async () => { close(); await sb.auth.signOut(); };
     $('#change-pass',sh).onclick = async () => { const p=$('#s-newpass',sh).value; if(p.length<8){ toast('Use at least 8 characters'); return; }
