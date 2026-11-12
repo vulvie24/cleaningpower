@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Text Blaster</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: single column work queue — load sheet, write message, tap down the list */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --fg:#14202e; --muted:#5d6b7c; --line:#d9e0e8;
+  --accent:#1f5fd1; --accent-fg:#ffffff; --ok:#1d8a4e; --ok-bg:#e3f4ea; --warn:#a15c00;
+  --display:"Space Grotesk",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e141c; --surface:#162030; --fg:#e6edf5; --muted:#93a3b6; --line:#26354a;
+  --accent:#6b9bff; --accent-fg:#0b1220; --ok:#5fd394; --ok-bg:#16301f; --warn:#f0b35a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e141c; --surface:#162030; --fg:#e6edf5; --muted:#93a3b6; --line:#26354a;
+  --accent:#6b9bff; --accent-fg:#0b1220; --ok:#5fd394; --ok-bg:#16301f; --warn:#f0b35a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:760px;margin:0 auto;padding-block:24px 64px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:20px}
+h1{font-family:var(--display);font-size:1.9rem;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:4px 0 0}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{font:inherit;font-weight:600;border-radius:8px;padding:10px 14px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input[type=file]{display:none}
+textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);min-height:110px;resize:vertical}
+select{font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);max-width:100%}
+.hint{font-size:.85rem;color:var(--muted)}
+.hint code{font-family:var(--mono);font-size:.82rem;background:var(--bg);padding:1px 5px;border-radius:4px}
+.example{font-size:.78rem;font-weight:600;color:var(--warn)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.stats b{font-family:var(--display);font-size:1.4rem;display:block;line-height:1.1}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);width:0;transition:width .25s}
+.list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.item{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:12px 14px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item.sent{background:var(--ok-bg)}
+.num{color:var(--muted);font-variant-numeric:tabular-nums;font-size:.85rem}
+.who{min-width:0}
+.phone{font-family:var(--mono);font-size:1rem;user-select:all}
+.name{color:var(--muted);font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.acts .btn{padding:8px 12px;min-height:38px;font-size:.9rem}
+.tag{font-size:.75rem;font-weight:600;color:var(--ok)}
+.skipped{font-size:.85rem;color:var(--warn)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:500;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+@media (max-width:520px){.item{grid-template-columns:1fr}.num{display:none}.acts{justify-content:flex-start}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head><body>
+
+<div class="wrap">
+  <header>
+    <h1>Text Blaster</h1>
+    <p class="sub">Load a spreadsheet, write your message once, then tap Send down the list.</p>
+  </header>
+
+  <section class="panel">
+    <span class="label">1 · Spreadsheet</span>
+    <div class="row">
+      <label class="btn primary" for="file">Choose Excel or CSV file</label>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv,.tsv,.ods">
+      <span id="fileName" class="hint">No file loaded</span>
+    </div>
+    <div class="row" id="colPick" hidden>
+      <label class="hint" for="phoneCol">Phone column</label>
+      <select id="phoneCol"></select>
+      <label class="hint" for="nameCol">Name column</label>
+      <select id="nameCol"></select>
+    </div>
+    <div id="skipped" class="skipped" hidden></div>
+  </section>
+
+  <section class="panel">
+    <span class="label">2 · Message</span>
+    <textarea id="msg">Hi {name}, this is Jonathan from CleaningPower. We have openings next week for carpet and upholstery cleaning. Reply to book a spot. Reply STOP to opt out.</textarea>
+    <p class="hint">Type <code>{name}</code> to drop in each person's first name. Leave it out to send the same text to everyone.</p>
+  </section>
+
+  <section class="panel">
+    <span class="label">3 · How to send</span>
+    <div class="row">
+      <label class="hint" for="batch">Numbers per text</label>
+      <select id="batch">
+        <option value="1">1 at a time (private, uses names)</option>
+        <option value="5">5 at a time</option>
+        <option value="10">10 at a time</option>
+      </select>
+    </div>
+    <p id="batchWarn" class="hint" hidden>Batches go out as a group text. Everyone in the batch sees the other numbers, and replies go to the whole group. <code>{name}</code> is left out.</p>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <div class="stats">
+        <div><b id="sTotal">0</b><span class="hint">numbers</span></div>
+        <div><b id="sSent">0</b><span class="hint">tapped</span></div>
+        <div><b id="sLeft">0</b><span class="hint">left</span></div>
+      </div>
+      <div class="row">
+        <a class="btn primary" id="nextBtn" href="#">Send next</a>
+        <button class="btn" id="resetBtn" type="button">Reset</button>
+      </div>
+    </div>
+    <div class="bar"><i id="bar"></i></div>
+    <span id="exampleNote" class="example">Showing example numbers. Load your spreadsheet to replace them.</span>
+  </section>
+
+  <div class="list" id="list"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let rows = [], headers = [], contacts = [], sent = new Set();
+const isApple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+
+const sample = [
+  {phone:"(973) 555-0142", name:"Sarah Klein"},
+  {phone:"201-555-0187", name:"Mike Ortiz"},
+  {phone:"9175550123", name:"Dana Weiss"},
+  {phone:"+1 732 555 0199", name:""},
+  {phone:"646.555.0110", name:"Yossi Green"}
+];
+
+function cleanPhone(v){
+  let d = String(v ?? "").replace(/\D/g,"");
+  if (d.length === 11 && d[0] === "1") d = d.slice(1);
+  return d.length === 10 ? d : null;
+}
+const pretty = d => `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+const first = n => String(n||"").trim().split(/\s+/)[0] || "";
+
+function personalize(name){
+  const n = first(name);
+  let t = $("msg").value;
+  return n ? t.replace(/\{name\}/gi, n) : t.replace(/\s*\{name\}/gi, "").replace(/^Hi,/,"Hi");
+}
+function smsHref(d, name){
+  const body = encodeURIComponent(personalize(name));
+  return `sms:+1${d}${isApple ? "&" : "?"}body=${body}`;
+}
+
+function guessCols(){
+  let best = -1, bestScore = 0;
+  headers.forEach((h,i)=>{
+    let score = rows.slice(0,50).filter(r=>cleanPhone(r[i])).length;
+    if (/phone|cell|mobile|tel|number/i.test(h)) score += 5;
+    if (score > bestScore){ bestScore = score; best = i; }
+  });
+  const nameIdx = headers.findIndex(h=>/^(first\s*)?name|full\s*name|customer|client|contact/i.test(h));
+  return {phone: best, name: nameIdx};
+}
+
+function fillSelects(g){
+  const opts = headers.map((h,i)=>`<option value="${i}">${h || "Column "+(i+1)}</option>`).join("");
+  $("phoneCol").innerHTML = opts;
+  $("nameCol").innerHTML = `<option value="-1">(none)</option>` + opts;
+  $("phoneCol").value = g.phone; $("nameCol").value = g.name;
+  $("colPick").hidden = false;
+}
+
+function build(){
+  const p = +$("phoneCol").value, n = +$("nameCol").value;
+  const seen = new Set(); let bad = 0, dup = 0;
+  contacts = [];
+  rows.forEach(r=>{
+    const raw = r[p]; if (raw === undefined || raw === "") return;
+    const d = cleanPhone(raw);
+    if (!d){ bad++; return; }
+    if (seen.has(d)){ dup++; return; }
+    seen.add(d); contacts.push({d, name: n>=0 ? String(r[n]??"") : ""});
+  });
+  const msgs = [];
+  if (bad) msgs.push(`${bad} entr${bad>1?"ies":"y"} skipped (not a 10-digit US number)`);
+  if (dup) msgs.push(`${dup} duplicate${dup>1?"s":""} removed`);
+  $("skipped").textContent = msgs.join(" · ");
+  $("skipped").hidden = !msgs.length;
+  sent = new Set(); render();
+}
+
+const batchSize = () => +$("batch").value;
+function groupHref(idxs){
+  const nums = idxs.map(i=>"+1"+contacts[i].d).join(",");
+  const body = encodeURIComponent(personalize(""));
+  return isApple ? `sms://open?addresses=${nums}&body=${body}` : `sms:${nums}?body=${body}`;
+}
+function groups(){
+  const out = [], n = batchSize();
+  for (let i=0;i<contacts.length;i+=n) out.push([...Array(Math.min(n,contacts.length-i)).keys()].map(k=>i+k));
+  return out;
+}
+function render(){
+  $("batchWarn").hidden = batchSize() === 1;
+  if (batchSize() > 1) return renderGroups();
+  $("list").innerHTML = contacts.map((c,i)=>`
+    <div class="item ${sent.has(i)?"sent":""}" data-i="${i}">
+      <span class="num">${i+1}</span>
+      <div class="who"><div class="phone">${pretty(c.d)}</div>
+        <div class="name">${c.name ? esc(c.name) : "&nbsp;"}${sent.has(i)?' · <span class="tag">Tapped, check Messages</span>':""}</div></div>
+      <div class="acts">
+        <a class="btn primary" data-act="send" href="${smsHref(c.d,c.name)}">Send</a>
+        <button class="btn" data-act="copy" type="button">Copy #</button>
+        <button class="btn" data-act="copymsg" type="button">Copy text</button>
+      </div>
+    </div>`).join("") || `<div class="item"><span></span><span class="hint">No phone numbers found. Pick a different phone column above.</span></div>`;
+  stats();
+}
+function renderGroups(){
+  $("list").innerHTML = groups().map((g,gi)=>{
+    const done = g.every(i=>sent.has(i));
+    return `<div class="item ${done?"sent":""}" data-g="${gi}">
+      <span class="num">${gi+1}</span>
+      <div class="who"><div class="phone" style="font-size:.85rem;line-height:1.6">${g.map(i=>pretty(contacts[i].d)).join("<br>")}</div>
+        <div class="name">Batch ${gi+1} · ${g.length} numbers${done?' · <span class="tag">Tapped, check Messages</span>':""}</div></div>
+      <div class="acts">
+        <a class="btn primary" data-act="gsend" href="${groupHref(g)}">Send ${g.length}</a>
+        <button class="btn" data-act="gcopy" type="button">Copy #s</button>
+        <button class="btn" data-act="gcopymsg" type="button">Copy text</button>
+      </div></div>`;
+  }).join("");
+  stats();
+}
+function stats(){
+  const t = contacts.length, s = sent.size;
+  $("sTotal").textContent = t; $("sSent").textContent = s; $("sLeft").textContent = t - s;
+  $("bar").style.width = t ? (s/t*100)+"%" : 0;
+  if (batchSize() > 1){
+    const nb = $("nextBtn"), gs = groups(), gi = gs.findIndex(g=>!g.every(i=>sent.has(i)));
+    if (gi < 0){ nb.removeAttribute("href"); nb.textContent = t ? "All sent" : "Send next"; nb.dataset.i = ""; }
+    else { nb.href = groupHref(gs[gi]); nb.textContent = `Send next batch (#${gi+1})`; nb.dataset.i = "g"+gi; }
+    return;
+  }
+  const next = contacts.findIndex((_,i)=>!sent.has(i));
+  const nb = $("nextBtn");
+  if (next < 0){ nb.removeAttribute("href"); nb.textContent = t ? "All sent" : "Send next"; nb.dataset.i = ""; }
+  else { nb.href = smsHref(contacts[next].d, contacts[next].name); nb.textContent = `Send next (#${next+1})`; nb.dataset.i = next; }
+}
+const esc = s => s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("on"); clearTimeout(toast.h); toast.h=setTimeout(()=>el.classList.remove("on"),1600); }
+async function copy(text, label){
+  try { await navigator.clipboard.writeText(text); toast(label+" copied"); }
+  catch { toast("Press and hold to copy"); }
+}
+function markSent(i){ sent.add(i); render(); }
+
+$("list").addEventListener("click", e=>{
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const gEl = b.closest("[data-g]");
+  if (gEl){
+    const g = groups()[+gEl.dataset.g];
+    if (b.dataset.act === "gsend") setTimeout(()=>{ g.forEach(i=>sent.add(i)); render(); }, 300);
+    if (b.dataset.act === "gcopy") copy(g.map(i=>contacts[i].d).join(", "), "Numbers");
+    if (b.dataset.act === "gcopymsg") copy(personalize(""), "Message");
+    return;
+  }
+  const i = +b.closest(".item").dataset.i, c = contacts[i];
+  if (b.dataset.act === "send") setTimeout(()=>markSent(i), 300);
+  if (b.dataset.act === "copy") copy(c.d, "Number");
+  if (b.dataset.act === "copymsg") copy(personalize(c.name), "Message");
+});
+$("nextBtn").addEventListener("click", e=>{
+  const i = e.currentTarget.dataset.i;
+  if (i === "" || i === undefined){ e.preventDefault(); return; }
+  if (i[0] === "g"){ const g = groups()[+i.slice(1)]; setTimeout(()=>{ g.forEach(k=>sent.add(k)); render(); }, 300); return; }
+  setTimeout(()=>markSent(+i), 300);
+});
+$("batch").addEventListener("change", render);
+$("resetBtn").addEventListener("click", ()=>{ sent = new Set(); render(); toast("Progress cleared"); });
+$("msg").addEventListener("input", render);
+$("phoneCol").addEventListener("change", build);
+$("nameCol").addEventListener("change", build);
+
+$("file").addEventListener("change", e=>{
+  const f = e.target.files[0]; if (!f) return;
+  $("fileName").textContent = f.name;
+  const r = new FileReader();
+  r.onload = ev=>{
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), {type:"array"});
+      let all = [];
+      wb.SheetNames.forEach(sn=>{
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[sn], {header:1, raw:false, defval:""});
+        if (!all.length) all = data; else all = all.concat(data.slice(1));
+      });
+      if (!all.length) throw new Error("empty");
+      const firstRowHasPhone = all[0].some(c=>cleanPhone(c));
+      headers = firstRowHasPhone ? all[0].map((_,i)=>"Column "+(i+1)) : all[0].map(String);
+      rows = firstRowHasPhone ? all : all.slice(1);
+      fillSelects(guessCols());
+      $("exampleNote").hidden = true;
+      build();
+      toast(`Loaded ${contacts.length} numbers`);
+    } catch(err){
+      $("fileName").textContent = "Couldn't read that file. Save it as .xlsx or .csv and try again.";
+    }
+  };
+  r.readAsArrayBuffer(f);
+});
+
+contacts = sample.map(s=>({d:cleanPhone(s.phone), name:s.name}));
+render();
+</script>
+</body></html>
